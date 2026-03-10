@@ -1,6 +1,7 @@
+package main
 
+import "fmt"
 
-
-int main(){
-        return 0;
+func main() {
+	fmt.Println("hello world")
 }
