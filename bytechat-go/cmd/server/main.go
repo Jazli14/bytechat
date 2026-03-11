@@ -79,6 +79,7 @@ func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
 
 type RoomManager struct {
 	rooms map[string]*Hub
+	users map[string]*User
 	mu    sync.RWMutex
 }
 
@@ -104,6 +105,22 @@ func (rm *RoomManager) getOrCreateRoom(ctx context.Context, wg *sync.WaitGroup, 
 	return hub
 }
 
+func (rm *RoomManager) claimUsername(user *User) bool {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	if _, taken := rm.users[user.username]; taken {
+		return false
+	}
+	rm.users[user.username] = user
+	return true
+}
+
+func (rm *RoomManager) releaseUsername(username string) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	delete(rm.users, username)
+}
+
 func handleConnection(ctx context.Context, conn net.Conn, id int, rm *RoomManager, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer conn.Close()
@@ -112,21 +129,32 @@ func handleConnection(ctx context.Context, conn net.Conn, id int, rm *RoomManage
 		<-ctx.Done()
 		conn.Close()
 	}()
-
-	conn.Write([]byte("Enter username: "))
-
 	buffer := make([]byte, 1024)
-	n, err := conn.Read(buffer)
-	if err != nil {
-		fmt.Println("Client disconnected before sending username")
-		return
-	}
-	username := strings.TrimSpace(string(buffer[:n]))
+	var username string
+	var user *User
 
-	user := &User{conn: conn, id: id, username: username}
+	for {
+		conn.Write([]byte("Enter username: "))
+
+		n, err := conn.Read(buffer)
+		if err != nil {
+			fmt.Println("Client disconnected before sending username")
+			return
+		}
+		username = strings.TrimSpace(string(buffer[:n]))
+
+		user = &User{conn: conn, id: id, username: username}
+		if rm.claimUsername(user) {
+			defer rm.releaseUsername(user.username)
+			break
+		}
+		rm.mu.Unlock()
+		conn.Write([]byte("Username already taken, please choose another one: "))
+
+	}
 
 	conn.Write([]byte("Enter room: "))
-	n, err = conn.Read(buffer)
+	n, err := conn.Read(buffer)
 	if err != nil {
 		fmt.Printf("Server: %s disconnected before sending room name\n", user.username)
 		return
@@ -157,6 +185,29 @@ func handleConnection(ctx context.Context, conn net.Conn, id int, rm *RoomManage
 				return
 			}
 			readBuffer := string(buffer[:n])
+
+			if strings.HasPrefix(strings.TrimSpace(readBuffer), "/dm ") {
+				parts := strings.SplitN(strings.TrimSpace(readBuffer), " ", 3)
+				if len(parts) < 3 {
+					fmt.Fprintf(conn, "Server: Usage: /dm <username> <message>\n")
+					continue
+				}
+				targetUsername, msg := parts[1], parts[2]
+
+				rm.mu.RLock()
+				target, ok := rm.users[targetUsername]
+				rm.mu.RUnlock()
+
+				if !ok {
+					fmt.Fprintf(conn, "Server: User %s not found\n", targetUsername)
+					continue
+				}
+
+				fmt.Fprintf(target.conn, "[DM from %s]: %s\n", user.username, msg)
+				fmt.Fprintf(conn, "[DM to %s]: %s\n", targetUsername, msg)
+				continue
+			}
+
 			if strings.TrimSpace(readBuffer) == "/leave" {
 				hub.unregister <- user
 				hub.broadcast <- Message{sender: nil, content: []byte(fmt.Sprintf("Server: %s left the room [%s]", user.username, hub.name))}
