@@ -55,7 +55,7 @@ func readInput(ctx context.Context, conn net.Conn) error {
 			if !ok {
 				return errInputClosed
 			}
-			_, err := conn.Write([]byte(line))
+			_, err := conn.Write([]byte(line + "\n"))
 			if err != nil {
 				return fmt.Errorf("could not send message: %w", err)
 			}

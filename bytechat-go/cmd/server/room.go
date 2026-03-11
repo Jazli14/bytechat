@@ -20,7 +20,7 @@ type RoomManager struct {
 	mu    sync.RWMutex
 }
 
-// getOrCreateRoom uses double-checked locking to avoid creating duplicate hubs
+// uses double-checked locking to avoid creating duplicate hubs
 func (rm *RoomManager) getOrCreateRoom(ctx context.Context, wg *sync.WaitGroup, name string) *Hub {
 	rm.mu.RLock()
 	hub, ok := rm.rooms[name]
@@ -59,16 +59,21 @@ func (rm *RoomManager) releaseUsername(username string) {
 }
 
 func (rm *RoomManager) promptUsername(conn net.Conn, buf []byte) (*User, error) {
+	msg := "Enter username: "
 	for {
-		name, err := prompt(conn, "Enter username: ", buf)
+		name, err := prompt(conn, msg, buf)
 		if err != nil {
 			return nil, err
+		}
+		if name == "" {
+			msg = "Username cannot be empty. Enter username: "
+			continue
 		}
 		user := &User{conn: conn, username: name}
 		if rm.claimUsername(user) {
 			return user, nil
 		}
-		conn.Write([]byte("Username already taken, please choose another: "))
+		msg = "Username already taken, please choose another: "
 	}
 }
 
@@ -116,11 +121,19 @@ func (rm *RoomManager) broadcastAll(ctx context.Context, wg *sync.WaitGroup) {
 			if !ok {
 				return
 			}
+
+			// copies hubs under lock then send after unlocking to avoid deadlocks from blocked channels.
 			rm.mu.RLock()
+			hubs := make([]*Hub, 0, len(rm.rooms))
 			for _, hub := range rm.rooms {
-				hub.broadcast <- Message{content: []byte("Server: " + line + "\n")}
+				hubs = append(hubs, hub)
 			}
 			rm.mu.RUnlock()
+
+			msg := Message{content: []byte("Server: " + line + "\n")}
+			for _, hub := range hubs {
+				send(ctx, hub.broadcast, msg)
+			}
 		}
 	}
 }

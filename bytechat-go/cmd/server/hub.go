@@ -24,13 +24,13 @@ func newHub(name string) *Hub {
 	return &Hub{
 		name:       name,
 		clients:    make(map[*User]struct{}),
-		register:   make(chan *User),
-		unregister: make(chan *User),
-		broadcast:  make(chan Message),
+		register:   make(chan *User, 1),
+		unregister: make(chan *User, 1),
+		broadcast:  make(chan Message, 16),
 	}
 }
 
-// run is the hub's event loop
+// run is the hub's event loop all mutations are serialized through this single goroutine via channels
 func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -55,16 +55,30 @@ func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
-func (h *Hub) join(user *User) {
-	h.register <- user
-	msg := fmt.Sprintf("Server: %s connected to room [%s]\n", user.username, h.name)
-	fmt.Print(msg)
-	h.broadcast <- Message{content: []byte(msg)}
+// send attempts to send on ch, but abandons the send if ctx is cancelled.
+func send[T any](ctx context.Context, ch chan<- T, val T) bool {
+	select {
+	case ch <- val:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
-func (h *Hub) leave(user *User) {
-	h.unregister <- user
+func (h *Hub) join(ctx context.Context, user *User) {
+	if !send(ctx, h.register, user) {
+		return
+	}
+	msg := fmt.Sprintf("Server: %s connected to room [%s]\n", user.username, h.name)
+	fmt.Print(msg)
+	send(ctx, h.broadcast, Message{content: []byte(msg)})
+}
+
+func (h *Hub) leave(ctx context.Context, user *User) {
+	if !send(ctx, h.unregister, user) {
+		return
+	}
 	msg := fmt.Sprintf("Server: %s left room [%s]\n", user.username, h.name)
 	fmt.Print(msg)
-	h.broadcast <- Message{content: []byte(msg)}
+	send(ctx, h.broadcast, Message{content: []byte(msg)})
 }

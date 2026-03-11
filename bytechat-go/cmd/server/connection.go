@@ -11,7 +11,9 @@ import (
 )
 
 func prompt(conn net.Conn, msg string, buf []byte) (string, error) {
-	conn.Write([]byte(msg))
+	if _, err := conn.Write([]byte(msg)); err != nil {
+		return "", err
+	}
 	n, err := conn.Read(buf)
 	if err != nil {
 		return "", err
@@ -22,7 +24,7 @@ func prompt(conn net.Conn, msg string, buf []byte) (string, error) {
 func handleConnection(ctx context.Context, conn net.Conn, rm *RoomManager, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer conn.Close()
-		go func() {
+	go func() {
 		<-ctx.Done()
 		conn.Close()
 	}()
@@ -36,14 +38,14 @@ func handleConnection(ctx context.Context, conn net.Conn, rm *RoomManager, wg *s
 	}
 	defer rm.releaseUsername(user.username)
 
-	roomName, err := prompt(conn, "Enter room: ", buf)
+	roomName, err := promptNonEmpty(conn, "Enter room: ", buf)
 	if err != nil {
 		fmt.Printf("Server: %s disconnected before sending room name\n", user.username)
 		return
 	}
 
 	hub := rm.getOrCreateRoom(ctx, wg, roomName)
-	hub.join(user)
+	hub.join(ctx, user)
 
 	for {
 		select {
@@ -53,15 +55,16 @@ func handleConnection(ctx context.Context, conn net.Conn, rm *RoomManager, wg *s
 			n, err := conn.Read(buf)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					msg := fmt.Sprintf("Server: %s disconnected\n", user.username)
-					fmt.Print(msg)
-					hub.unregister <- user
-					hub.broadcast <- Message{content: []byte(msg)}
+					fmt.Printf("Server: %s disconnected\n", user.username)
+					hub.leave(ctx, user)
 				}
 				return
 			}
 
 			line := strings.TrimSpace(string(buf[:n]))
+			if line == "" {
+				continue
+			}
 
 			switch {
 			case strings.HasPrefix(line, "/dm "):
@@ -69,20 +72,34 @@ func handleConnection(ctx context.Context, conn net.Conn, rm *RoomManager, wg *s
 				rm.handleDM(user, parts)
 
 			case line == "/leave":
-				hub.leave(user)
-				roomName, err := prompt(conn, fmt.Sprintf("Server: You left [%s]. Enter room: ", hub.name), buf)
+				hub.leave(ctx, user)
+				roomName, err := promptNonEmpty(conn, fmt.Sprintf("Server: You left [%s]. Enter room: ", hub.name), buf)
 				if err != nil {
 					fmt.Printf("Server: %s disconnected before sending new room name\n", user.username)
 					return
 				}
 				hub = rm.getOrCreateRoom(ctx, wg, roomName)
-				hub.join(user)
+				hub.join(ctx, user)
 
 			default:
 				msg := fmt.Sprintf("[%s] %s: %s\n", hub.name, user.username, line)
-				hub.broadcast <- Message{sender: conn, content: []byte(msg)}
+				send(ctx, hub.broadcast, Message{sender: conn, content: []byte(msg)})
 				fmt.Print(msg)
 			}
 		}
+	}
+}
+
+// promptNonEmpty repeats the prompt until the user provides a non-empty value.
+func promptNonEmpty(conn net.Conn, msg string, buf []byte) (string, error) {
+	for {
+		val, err := prompt(conn, msg, buf)
+		if err != nil {
+			return "", err
+		}
+		if val != "" {
+			return val, nil
+		}
+		msg = "Input cannot be empty. " + msg
 	}
 }
