@@ -2,10 +2,13 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 type Hub struct {
@@ -49,29 +52,35 @@ func (h *Hub) run() {
 	}
 }
 
-func handleConnection(conn net.Conn, id int, hub *Hub) {
+func handleConnection(ctx context.Context, conn net.Conn, id int, hub *Hub) {
 	defer func() {
 		if err := conn.Close(); err != nil {
 			panic("Connection could not be closed")
 		}
 	}()
+	hub.register <- conn
 
 	buffer := make([]byte, 1024)
+
 	for {
-		n, err := conn.Read(buffer)
-		if err != nil {
-			if err == io.EOF {
-				hub.unregister <- conn
-				fmt.Println("Client disconnected")
-			} else {
-				fmt.Println("Error reading from connection: ", err)
-			}
+		select {
+		case <-ctx.Done():
+			hub.unregister <- conn
 			return
+		default:
+			n, err := conn.Read(buffer)
+			if err != nil {
+				if err == io.EOF {
+					hub.unregister <- conn
+					fmt.Printf("Client %d disconnected\n", id)
+				}
+				return
+			}
+			readBuffer := string(buffer[:n])
+			message := fmt.Sprintf("Client %d: %s", id, readBuffer)
+			hub.broadcast <- Message{sender: conn, content: []byte(message)}
+			fmt.Println(message)
 		}
-		readBuffer := string(buffer[:n])
-		message := fmt.Sprintf("Client %d: %s", id, readBuffer)
-		hub.broadcast <- Message{sender: conn, content: []byte(message)}
-		fmt.Println(message)
 	}
 }
 
@@ -86,30 +95,42 @@ func main() {
 	hub := newHub()
 	idCount := 0
 	listener, err := net.Listen("tcp", ":8080")
+
+	ctx, cancel := context.WithCancel(context.Background())
 	if err != nil {
 		panic("Could not listen on TCP:8080")
 	}
-
-	defer func() {
-		if err := listener.Close(); err != nil {
-			panic("Listener could not be closed")
-		}
-	}()
 
 	fmt.Println("Server listening on :8080")
 
 	go broadcastMessage(hub)
 	go hub.run()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					fmt.Println("Could not accept connection: ", err)
+					continue
+				}
+			}
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Could not accept connection: ", err)
-			continue
+			idCount++
+			go handleConnection(ctx, conn, idCount, hub)
 		}
-		hub.register <- conn
+	}()
 
-		idCount++
-		go handleConnection(conn, idCount, hub)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	<-quit
+	fmt.Println("Shutting down server...")
+	cancel()
+
+	if err := listener.Close(); err != nil {
+		panic("Listener could not be closed")
 	}
 }
