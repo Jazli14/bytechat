@@ -30,6 +30,7 @@ func newHub(name string) *Hub {
 	}
 }
 
+// run is the hub's event loop
 func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 

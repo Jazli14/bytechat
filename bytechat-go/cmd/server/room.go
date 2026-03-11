@@ -11,7 +11,6 @@ import (
 
 type User struct {
 	conn     net.Conn
-	id       int
 	username string
 }
 
@@ -21,6 +20,7 @@ type RoomManager struct {
 	mu    sync.RWMutex
 }
 
+// getOrCreateRoom uses double-checked locking to avoid creating duplicate hubs
 func (rm *RoomManager) getOrCreateRoom(ctx context.Context, wg *sync.WaitGroup, name string) *Hub {
 	rm.mu.RLock()
 	hub, ok := rm.rooms[name]
@@ -58,13 +58,13 @@ func (rm *RoomManager) releaseUsername(username string) {
 	delete(rm.users, username)
 }
 
-func (rm *RoomManager) promptUsername(conn net.Conn, buf []byte, id int) (*User, error) {
+func (rm *RoomManager) promptUsername(conn net.Conn, buf []byte) (*User, error) {
 	for {
 		name, err := prompt(conn, "Enter username: ", buf)
 		if err != nil {
 			return nil, err
 		}
-		user := &User{conn: conn, id: id, username: name}
+		user := &User{conn: conn, username: name}
 		if rm.claimUsername(user) {
 			return user, nil
 		}
@@ -85,6 +85,11 @@ func (rm *RoomManager) handleDM(sender *User, parts []string) {
 
 	if !ok {
 		fmt.Fprintf(sender.conn, "Server: User %s not found\n", targetName)
+		return
+	}
+
+	if target.username == sender.username {
+		fmt.Fprintf(sender.conn, "Server: You cannot DM yourself\n")
 		return
 	}
 	fmt.Fprintf(target.conn, "[DM from %s]: %s\n", sender.username, msg)

@@ -21,7 +21,8 @@ func main() {
 
 	listener, err := net.Listen("tcp", config.Port)
 	if err != nil {
-		panic("Could not listen on TCP" + config.Port)
+		fmt.Println("Could not listen on TCP" + config.Port + ": ", err)
+		return
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -30,7 +31,7 @@ func main() {
 	wg.Add(1)
 	go rm.broadcastAll(ctx, &wg)
 
-	idCount := 0
+	// accept loop spawns a handleConnection goroutine per client
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -45,12 +46,12 @@ func main() {
 					continue
 				}
 			}
-			idCount++
 			wg.Add(1)
-			go handleConnection(ctx, conn, idCount, rm, &wg)
+			go handleConnection(ctx, conn, rm, &wg)
 		}
 	}()
 
+	// block until SIGINT/SIGTERM, then cancel ctx and close the listener
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

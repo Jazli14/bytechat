@@ -32,7 +32,7 @@ func receiveMessages(ctx context.Context, conn net.Conn) error {
 					return fmt.Errorf("error reading from connection: %w", err)
 				}
 			}
-			fmt.Println(string(buffer[:n]))
+			fmt.Print(string(buffer[:n]))
 		}
 	}
 }
@@ -70,12 +70,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	defer conn.Close()
-
 	g, ctx := errgroup.WithContext(context.Background())
 
 	g.Go(func() error { return receiveMessages(ctx, conn) })
 	g.Go(func() error { return readInput(ctx, conn) })
+
+	// watcher goroutine to signal closure of connection when either of the above goroutines exit
 	g.Go(func() error {
 		<-ctx.Done()
 		conn.Close()

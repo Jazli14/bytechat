@@ -19,18 +19,17 @@ func prompt(conn net.Conn, msg string, buf []byte) (string, error) {
 	return strings.TrimSpace(string(buf[:n])), nil
 }
 
-func handleConnection(ctx context.Context, conn net.Conn, id int, rm *RoomManager, wg *sync.WaitGroup) {
+func handleConnection(ctx context.Context, conn net.Conn, rm *RoomManager, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer conn.Close()
-
-	go func() {
+		go func() {
 		<-ctx.Done()
 		conn.Close()
 	}()
 
 	buf := make([]byte, 1024)
 
-	user, err := rm.promptUsername(conn, buf, id)
+	user, err := rm.promptUsername(conn, buf)
 	if err != nil {
 		fmt.Println("Client disconnected before sending username")
 		return
