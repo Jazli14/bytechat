@@ -8,14 +8,22 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
 )
 
 type Hub struct {
-	clients    map[net.Conn]struct{}
-	register   chan net.Conn
-	unregister chan net.Conn
+	clients    map[*User]struct{}
+	register   chan *User
+	unregister chan *User
 	broadcast  chan Message
+}
+
+type User struct {
+	conn     net.Conn
+	id       int
+	username string
 }
 
 type Message struct {
@@ -25,26 +33,39 @@ type Message struct {
 
 func newHub() *Hub {
 	return &Hub{
-		clients:    make(map[net.Conn]struct{}),
-		register:   make(chan net.Conn),
-		unregister: make(chan net.Conn),
+		clients:    make(map[*User]struct{}),
+		register:   make(chan *User),
+		unregister: make(chan *User),
 		broadcast:  make(chan Message),
 	}
 }
 
-func (h *Hub) run() {
+func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	for {
 		select {
+		case <-ctx.Done():
+			for client := range h.clients {
+				if err := client.conn.Close(); err != nil {
+					fmt.Println("Could not close client connection: ", err)
+				}
+			}
+			return
+
 		case conn := <-h.register:
 			h.clients[conn] = struct{}{}
+
 		case conn := <-h.unregister:
 			delete(h.clients, conn)
+
 		case message := <-h.broadcast:
 			for client := range h.clients {
-				if client != message.sender {
-					_, err := client.Write(message.content)
+				if client.conn != message.sender {
+					_, err := client.conn.Write(message.content)
 					if err != nil {
-						panic("Could not write to client")
+						fmt.Println("Could not send message to client: ", err)
+						delete(h.clients, client)
 					}
 				}
 			}
@@ -52,46 +73,76 @@ func (h *Hub) run() {
 	}
 }
 
-func handleConnection(ctx context.Context, conn net.Conn, id int, hub *Hub) {
-	defer func() {
-		if err := conn.Close(); err != nil {
-			panic("Connection could not be closed")
-		}
-	}()
-	hub.register <- conn
+func handleConnection(ctx context.Context, conn net.Conn, id int, hub *Hub, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	conn.Write([]byte("Enter username: "))
 
 	buffer := make([]byte, 1024)
+	n, err := conn.Read(buffer)
+	if err != nil {
+		fmt.Println("Client disconnected before sending username")
+		conn.Close()
+		return
+	}
+	username := strings.TrimSpace(string(buffer[:n]))
+
+	user := &User{conn: conn, id: id, username: username}
+	hub.register <- user
+	fmt.Printf("%s connected\n", user.username)
+	hub.broadcast <- Message{sender: nil, content: []byte(fmt.Sprintf("%s connected", user.username))}
 
 	for {
 		select {
 		case <-ctx.Done():
-			hub.unregister <- conn
+			hub.unregister <- user
 			return
+
 		default:
 			n, err := conn.Read(buffer)
 			if err != nil {
 				if err == io.EOF {
-					hub.unregister <- conn
-					fmt.Printf("Client %d disconnected\n", id)
+					hub.unregister <- user
+					fmt.Printf("%s disconnected\n", user.username)
+					hub.broadcast <- Message{sender: nil, content: []byte(fmt.Sprintf("%s disconnected", user.username))}
 				}
 				return
 			}
 			readBuffer := string(buffer[:n])
-			message := fmt.Sprintf("Client %d: %s", id, readBuffer)
+			message := fmt.Sprintf("%s: %s", user.username, readBuffer)
 			hub.broadcast <- Message{sender: conn, content: []byte(message)}
 			fmt.Println(message)
 		}
 	}
 }
 
-func broadcastMessage(hub *Hub) {
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		hub.broadcast <- Message{sender: nil, content: []byte("Server: " + scanner.Text())}
+func broadcastMessage(ctx context.Context, hub *Hub, wg *sync.WaitGroup) {
+	defer wg.Done()
+	lines := make(chan string)
+
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case line, ok := <-lines:
+			if !ok {
+				return
+			}
+			hub.broadcast <- Message{sender: nil, content: []byte("Server: " + line)}
+		}
 	}
 }
 
 func main() {
+	var wg sync.WaitGroup
 	hub := newHub()
 	idCount := 0
 	listener, err := net.Listen("tcp", ":8080")
@@ -103,9 +154,15 @@ func main() {
 
 	fmt.Println("Server listening on :8080")
 
-	go broadcastMessage(hub)
-	go hub.run()
+	wg.Add(1)
+	go broadcastMessage(ctx, hub, &wg)
+
+	wg.Add(1)
+	go hub.run(ctx, &wg)
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
@@ -119,7 +176,8 @@ func main() {
 			}
 
 			idCount++
-			go handleConnection(ctx, conn, idCount, hub)
+			wg.Add(1)
+			go handleConnection(ctx, conn, idCount, hub, &wg)
 		}
 	}()
 
@@ -133,4 +191,6 @@ func main() {
 	if err := listener.Close(); err != nil {
 		panic("Listener could not be closed")
 	}
+	wg.Wait()
+	fmt.Println("Server gracefully stopped, all goroutines exited")
 }

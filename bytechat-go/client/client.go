@@ -2,26 +2,62 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
+
+	"golang.org/x/sync/errgroup"
 )
 
-func receiveMessages(conn net.Conn) {
+var errInputClosed = errors.New("input channel closed")
+
+func receiveMessages(ctx context.Context, conn net.Conn) error {
 	buffer := make([]byte, 1024)
 
 	for {
-		n, err := conn.Read(buffer)
-		if err != nil {
-			if err == io.EOF {
-				fmt.Println("Client disconnected")
-			} else {
-				fmt.Println("Error reading from connection: ", err)
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			n, err := conn.Read(buffer)
+			if err != nil {
+				if err == io.EOF {
+					return fmt.Errorf("server disconnected")
+				} else {
+					return fmt.Errorf("error reading from connection: %w", err)
+				}
 			}
-			return
+			fmt.Println(string(buffer[:n]))
 		}
-		fmt.Println(string(buffer[:n]))
+	}
+}
+
+func readInput(ctx context.Context, conn net.Conn) error {
+	lines := make(chan string)
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case line, ok := <-lines:
+			if !ok {
+				return errInputClosed
+			}
+			_, err := conn.Write([]byte(line))
+			if err != nil {
+				return fmt.Errorf("could not send message: %w", err)
+			}
+		}
 	}
 }
 
@@ -31,21 +67,19 @@ func main() {
 		panic("Failed to dial into TCP address :8080")
 	}
 
-	defer func() {
-		if err := conn.Close(); err != nil {
-			panic("Failed to close connection")
-		}
-	}()
+	defer conn.Close()
 
-	go receiveMessages(conn)
+	g, ctx := errgroup.WithContext(context.Background())
 
-	fmt.Println("Connected to TCP :8080")
+	g.Go(func() error { return receiveMessages(ctx, conn) })
+	g.Go(func() error { return readInput(ctx, conn) })
+	g.Go(func() error {
+		<-ctx.Done()
+		conn.Close()
+		return nil
+	})
 
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		_, err := conn.Write([]byte(scanner.Text()))
-		if err != nil {
-			panic("Failed to write to connection")
-		}
+	if err := g.Wait(); err != nil && !errors.Is(err, errInputClosed) {
+		fmt.Println(err)
 	}
 }
