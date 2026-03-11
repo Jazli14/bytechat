@@ -1,4 +1,4 @@
-# bytechat
+# ByteChat
 
 A terminal-based TCP chat application built twice, once in **Go** and once in **C++** as a language learning project for systems programming, networking, and concurrency.
 
