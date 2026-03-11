@@ -10,6 +10,8 @@ import (
 	"os"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/Jazli14/bytechat/bytechat-go/config"
 )
 
 var errInputClosed = errors.New("input channel closed")
@@ -62,9 +64,10 @@ func readInput(ctx context.Context, conn net.Conn) error {
 }
 
 func main() {
-	conn, err := net.Dial("tcp", ":8080")
+	conn, err := net.Dial("tcp", config.Port)
 	if err != nil {
-		panic("Failed to dial into TCP address :8080")
+		fmt.Println("Could not connect to server at port", config.Port)
+		os.Exit(1)
 	}
 
 	defer conn.Close()
