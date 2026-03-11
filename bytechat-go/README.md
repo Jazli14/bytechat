@@ -1,6 +1,6 @@
 # ByteChat
 
-A concurrent, multi-room TCP chat server and client written in Go from scratch -- no frameworks, no third-party networking libraries. ByteChat demonstrates systems-level network programming with raw TCP sockets, idiomatic Go concurrency patterns, and full graceful shutdown semantics.
+A concurrent, multi-room TCP chat server and client written in Go from scratch, no frameworks, no third-party networking libraries. ByteChat demonstrates systems-level network programming with raw TCP sockets, idiomatic Go concurrency patterns, and full graceful shutdown semantics.
 
 ## Table of Contents
 
@@ -182,7 +182,8 @@ Server → Room:    Server: <username> connected to room [<room_name>]\n
 
 ### Prerequisites
 
-- Go 1.21+ installed ([download](https://go.dev/dl/))
+- Go 1.26+ (Developed and tested on 1.26.1) ([download](https://go.dev/dl/))
+- A terminal with netcat or telnet (for manual testing)
 
 ### Build
 
@@ -276,5 +277,5 @@ ByteChat is a real-time communication system focused on demonstrating concurrent
 
 | Package | Version | Purpose |
 |---|---|---|
-| Go standard library | - | TCP networking (`net`), concurrency (`sync`, `context`), signal handling (`os/signal`), buffered I/O (`bufio`) |
+| Go standard library | 1.26.1 | TCP networking (`net`), concurrency (`sync`, `context`), signal handling (`os/signal`), buffered I/O (`bufio`) |
 | [`golang.org/x/sync`](https://pkg.go.dev/golang.org/x/sync) | v0.20.0 | `errgroup.Group` for coordinated goroutine lifecycle management in the client |
