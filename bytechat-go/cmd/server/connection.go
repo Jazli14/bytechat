@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -9,7 +10,6 @@ import (
 	"sync"
 )
 
-// prompt writes msg to conn and returns the trimmed response.
 func prompt(conn net.Conn, msg string, buf []byte) (string, error) {
 	conn.Write([]byte(msg))
 	n, err := conn.Read(buf)
@@ -53,7 +53,7 @@ func handleConnection(ctx context.Context, conn net.Conn, id int, rm *RoomManage
 		default:
 			n, err := conn.Read(buf)
 			if err != nil {
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					msg := fmt.Sprintf("Server: %s disconnected\n", user.username)
 					fmt.Print(msg)
 					hub.unregister <- user

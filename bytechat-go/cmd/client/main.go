@@ -26,7 +26,7 @@ func receiveMessages(ctx context.Context, conn net.Conn) error {
 		default:
 			n, err := conn.Read(buffer)
 			if err != nil {
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					return fmt.Errorf("server disconnected")
 				} else {
 					return fmt.Errorf("error reading from connection: %w", err)
