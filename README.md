@@ -52,7 +52,7 @@ Client → Server:  <room_name>
 
 Building the same system twice makes the tradeoffs concrete:
 
-- **Go** goroutines, channels, the hub pattern, context cancellation, errgroup
-- **C++** POSIX sockets, `std::thread`, `std::mutex`, condition variables, RAII
+- **Go**: goroutines, channels, the hub pattern, context cancellation, errgroup
+- **C++**: POSIX sockets, `std::thread`, `std::mutex`, condition variables, RAII
 
 Same problem, different tools. The comparison is the point.
