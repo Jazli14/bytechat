@@ -30,3 +30,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# C++
+# CMake build directory
+/bytechat-cpp/build/
+/.vscode/
