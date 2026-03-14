@@ -8,5 +8,10 @@ project(bytechat-cpp VERSION 1.0)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-# 4. Create the executable (OutputName SourceFiles)
 add_executable(bytechat main.cpp)
+
+add_custom_target(run
+    COMMAND bytechat
+    DEPENDS bytechat
+    WORKING_DIRECTORY ${bytechat-cpp}
+)
