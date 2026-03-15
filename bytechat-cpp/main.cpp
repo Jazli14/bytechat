@@ -9,9 +9,9 @@
 
 enum class SendResult
 {
-    Success,
-    ClientDisconnected,
-    NetworkError
+    Success = 0 ,
+    ClientDisconnected = 1,
+    NetworkError = 2
 };
 
 // send message in a loop in case it's too long or error occurs
@@ -82,10 +82,15 @@ int safe_receive(Connection &conn)
 void broadcast_message(int fd)
 {
     std::string input;
-    if (std::getline(std::cin, input))
+    while (std::getline(std::cin, input))
     {
-        std::string message = "Server: " + input;
-        safe_send(fd, message.c_str());
+        std::string message = "Server: " + input + "\n";
+        SendResult result { safe_send(fd, message)};
+        if (result != SendResult::Success)
+        {
+            std::cerr << "Failed to send message: " << (result == SendResult::ClientDisconnected ? "Client disconnected" : "Network error") << std::endl;
+            break;
+        }
     }
 }
 
