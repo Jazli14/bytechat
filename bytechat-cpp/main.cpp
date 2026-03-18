@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <unordered_map>
 
-enum class SendResult { Success, ClientDisconnected, NetworkError };
+enum class SendResult { Success = 0, ClientDisconnected = 1, NetworkError = 2 };
 
 // send message in a loop in case it's too long or error occurs
 SendResult safe_send(int client_fd, const std::string &message) {
