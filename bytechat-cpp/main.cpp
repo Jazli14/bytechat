@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <unordered_map>
 
+static constexpr int MAX_EVENTS = 64;
+
 enum class SendResult { Success = 0, ClientDisconnected = 1, NetworkError = 2 };
 
 // send message in a loop in case it's too long or error occurs
@@ -47,6 +49,22 @@ void set_nonblocking(int fd) {
   fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
+void broadcast(int sender_fd, const std::string &msg,
+               std::unordered_map<int, Connection *> &connections) {
+  for (auto &[fd, other] : connections) {
+    if (fd != sender_fd) {
+      safe_send(fd, msg);
+    }
+  }
+}
+
+void dispatch(Connection &conn, const std::string &msg,
+              std::unordered_map<int, Connection *> &connections) {
+  // for now it's just a broadcast but will expand
+  std::cout << "[Client " << conn.fd << "]: " << msg;
+  broadcast(conn.fd, msg, connections);
+}
+
 bool handle_read(Connection &conn,
                  std::unordered_map<int, Connection *> &connections) {
   char temp_buffer[1024];
@@ -70,13 +88,7 @@ bool handle_read(Connection &conn,
     while ((pos = conn.buffer.find('\n')) != std::string::npos) {
       std::string msg = conn.buffer.substr(0, pos + 1);
       conn.buffer.erase(0, pos + 1);
-      std::cout << "[Client " << conn.fd << "]: " << msg;
-
-      for (auto &[fd, other] : connections) {
-        if (fd != conn.fd) {
-          safe_send(fd, msg);
-        }
-      }
+      dispatch(conn, msg, connections);
     }
   }
 }
@@ -169,18 +181,18 @@ int main() {
     return 1;
   }
 
-  epoll_event ev{};
-  ev.events = EPOLLIN;
-  ev.data.fd = server_fd;
-  epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev);
+  epoll_event server_ev{};
+  server_ev.events = EPOLLIN;
+  server_ev.data.fd = server_fd;
+  epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &server_ev);
 
   std::unordered_map<int, Connection *> connections;
-  epoll_event events[64];
+  epoll_event events[MAX_EVENTS];
 
   std::cout << "Server listening on :8080" << std::endl;
 
   while (true) {
-    int n = epoll_wait(epoll_fd, events, 64, -1);
+    int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
 
     if (n < 0) {
       if (errno == EINTR)
@@ -190,9 +202,9 @@ int main() {
     }
 
     for (int i = 0; i < n; i++) {
-      int fd = events[i].data.fd;
 
-      if (fd == server_fd) {
+      // i think this is wrong ...
+      if (events[i].data.fd == server_fd) {
         // new connection
         int client_fd = accept(server_fd, nullptr, nullptr);
         if (client_fd < 0) {
@@ -203,20 +215,21 @@ int main() {
 
         set_nonblocking(client_fd);
 
+        // could use a unique_ptr to manage this but I want to try using a
+        // manual pointer for learning purposes
         Connection *conn = new Connection(client_fd);
-        connections[client_fd];
+        connections[client_fd] = conn;
 
         epoll_event client_ev{};
-        client_ev.data.fd = client_fd;
-        client_ev.events = EPOLLIN;
+        client_ev.events = EPOLLIN | EPOLLET;
         client_ev.data.ptr = conn;
-        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev);
+        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &client_ev);
 
         std::cout << "Client connected: " << client_fd << "\n";
       } else {
         // existing connection has data
         Connection *conn = static_cast<Connection *>(events[i].data.ptr);
-        if (!handle_read) {
+        if (!handle_read(*conn, connections)) {
           remove_client(epoll_fd, conn->fd, connections);
         }
       }
