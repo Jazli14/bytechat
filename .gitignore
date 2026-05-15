@@ -36,4 +36,4 @@ go.work.sum
 /bytechat-cpp/build/
 /.vscode/
 
-.clang.format
+.clang-format
