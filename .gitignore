@@ -35,3 +35,5 @@ go.work.sum
 # CMake build directory
 /bytechat-cpp/build/
 /.vscode/
+
+.clang.format
