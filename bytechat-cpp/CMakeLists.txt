@@ -13,5 +13,5 @@ add_executable(bytechat main.cpp)
 add_custom_target(run
     COMMAND bytechat
     DEPENDS bytechat
-    WORKING_DIRECTORY ${bytechat-cpp}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
